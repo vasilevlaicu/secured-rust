@@ -1,0 +1,21 @@
+digraph G {
+    add [shape=Mdiamond];
+    precondition [label="Pre: a > 0"];
+    postcondition [label="Post: counter == 0"];
+    init_counter [label="let mut counter = 0 ;", shape=box]
+    invariant [label="Inv: counter >= 0 && counter <= a"];
+    loop_condition [label="counter < a", shape=diamond];
+    increment_counter [label="counter += 1", shape=box];
+    return_counter [label="return counter", shape=box];
+    end [shape=Msquare];
+
+    add -> precondition;
+    precondition -> postcondition;
+    postcondition -> init_counter;
+    init_counter -> invariant;
+    invariant -> loop_condition;
+    loop_condition -> increment_counter [label="true"];
+    increment_counter -> invariant;
+    loop_condition -> return_counter [label="false"];
+    return_counter -> end;
+}

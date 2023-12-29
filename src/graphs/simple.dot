@@ -1,0 +1,30 @@
+digraph G {
+0 [label="add", shape=Mdiamond]
+1 [label="Pre: a > 0", shape=ellipse]
+2 [label="Post: counter == a", shape=ellipse]
+3 [label="let mut counter = 0 ;", shape=box]
+4 [label="Inv: counter >= 0 && counter <= a", shape=ellipse]
+5 [label="while: counter < a", shape=diamond]
+6 [label="counter += 1", shape=box]
+7 [label="if: true", shape=diamond]
+8 [label="counter -= 1", shape=box]
+9 [label="else", shape=diamond]
+10 [label="counter += 1", shape=box]
+11 [label="counter", shape=box]
+12 [label="main", shape=Mdiamond]
+13 [label="let result = add (5) ;", shape=box]
+14 [label="Result: {}\" , result", shape=box]
+0 -> 1;
+1 -> 2;
+2 -> 3;
+3 -> 4;
+4 -> 5;
+5 -> 6;
+6 -> 7;
+7 -> 8;
+8 -> 9;
+9 -> 10;
+10 -> 11;
+12 -> 13;
+13 -> 14;
+}
