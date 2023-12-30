@@ -8,6 +8,7 @@ use syn::{
 use std::fs;
 use std::fs::File;
 use std::io::Write;
+use regex::Regex;
 
 #[derive(Debug, Clone)]
 enum CfgNode {
@@ -95,22 +96,26 @@ impl CfgBuilder {
         dot_string
     }
 
-    fn clean_up_formatting(&self, input: &str) -> String {
-        input.replace(" . ", ".")
-             .replace(" (", "(")
-             .replace(" )", ")")
-             // You can add more replacements as needed
-    }
+    fn clean_up_formatting(input: &str) -> String {
+        let re = Regex::new(r"\s*([\(\)\[\]!\.,;])\s*").unwrap();
+        let mut cleaned = re.replace_all(input, "$1").to_string();
+    
+        // Replace "vec! [" with "vec![" (remove spaces only where needed)
+        cleaned = cleaned.replace("vec! [", "vec!["); // Remove spaces only where needed
+        cleaned = cleaned.replace("+ ", " + ");
 
-    // Update existing methods to use this new formatting function
+        cleaned
+    }
+    
+    
     fn format_condition(&self, expr: &Box<Expr>) -> String {
         let raw_string = quote!(#expr).to_string();
-        self.clean_up_formatting(&raw_string)
+        Self::clean_up_formatting(&raw_string) // Use Self:: to call the associated function
     }
-
+    
     fn format_pattern_condition(&self, pat: &Pat) -> String {
         let raw_string = quote!(#pat).to_string();
-        self.clean_up_formatting(&raw_string)
+        Self::clean_up_formatting(&raw_string) // Use Self:: to call the associated function
     }
 
     
@@ -160,6 +165,12 @@ impl CfgBuilder {
                     // If the target is not a merge node, redirect incoming edges and remove the merge node
                     self.redirect_edges_and_remove(merge_node, target);
                 }
+            }
+        }
+        // Clean up formatting in the node labels
+        for node in self.graph.node_indices() {
+            if let CfgNode::Condition(label) | CfgNode::Statement(label) = &mut self.graph[node] {
+                *label = CfgBuilder::clean_up_formatting(label);
             }
         }
     }
