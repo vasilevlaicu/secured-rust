@@ -1,14 +1,13 @@
 use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::visit::EdgeRef;
 use quote::quote;
 use syn::{
     visit::{self, Visit},
     Expr, File as SynFile, ItemFn, Stmt, Block,
 };
-use std::env;
 use std::fs;
 use std::fs::File;
 use std::io::Write;
-use proc_macro2::TokenStream;
 
 #[derive(Debug, Clone)]
 enum CfgNode {
@@ -18,7 +17,8 @@ enum CfgNode {
     Invariant(String),
     Statement(String),
     Condition(String),
-    Loop(String),
+    Return(String),
+    MergePoint,
     // FunctionCall can be included under Statement if desired
 }
 
@@ -31,7 +31,8 @@ impl CfgNode {
             CfgNode::Invariant(inv) => (format!("Inv: {}", inv), "ellipse"), // Use "ellipse" shape
             CfgNode::Statement(stmt) => (stmt.clone(), "box"),
             CfgNode::Condition(cond) => (cond.clone(), "diamond"),
-            CfgNode::Loop(loop_cond) => (loop_cond.clone(), "parallelogram"),
+            CfgNode::MergePoint => (String::from("Merge"), "circle"), // Use "circle" shape
+            CfgNode::Return(ret) => (format!("return: {}", ret), "ellipse"), // Format for return nodes
         };
 
         format!("{} [label=\"{}\", shape={}]", index, self.escape_quotes_for_dot(&label), shape)
@@ -43,23 +44,30 @@ impl CfgNode {
 }
 
 
-struct CfgBuilder {
-    graph: DiGraph<CfgNode, ()>,
+struct CfgBuilder<'a> {
+    graph: DiGraph<CfgNode, &'a str>,
     current_node: Option<NodeIndex>,
+    next_edge_label: Option<&'a str>, // New field to store the label for the next edge
 }
 
-impl CfgBuilder {
+
+impl<'a> CfgBuilder<'a> {
     fn new() -> Self {
         CfgBuilder {
             graph: DiGraph::new(),
             current_node: None,
+            next_edge_label: None, // Initialize the new field
         }
     }
 
     fn add_node(&mut self, node: CfgNode) -> NodeIndex {
         let index = self.graph.add_node(node);
         if let Some(current) = self.current_node {
-            self.graph.add_edge(current, index, ());
+            // Use the label for the next edge if available
+            let label = self.next_edge_label.unwrap_or("");
+            self.graph.add_edge(current, index, label);
+            // Reset the edge label
+            self.next_edge_label = None;
         }
         self.current_node = Some(index);
         index
@@ -68,19 +76,22 @@ impl CfgBuilder {
     fn to_dot(&self) -> String {
         let mut dot_string = String::new();
         dot_string.push_str("digraph G {\n");
-
+    
+        // Add nodes
         for node in self.graph.node_indices() {
             let cfg_node = &self.graph[node];
             dot_string.push_str(&cfg_node.format_dot(node.index()));
             dot_string.push('\n');
         }
-
-        for edge in self.graph.raw_edges() {
-            let source = format!("{}", edge.source().index());
-            let target = format!("{}", edge.target().index());
-            dot_string.push_str(&format!("{} -> {};\n", source, target));
+    
+        // Add edges with labels
+        for edge in self.graph.edge_references() {
+            let source = edge.source().index();
+            let target = edge.target().index();
+            let label = edge.weight();
+            dot_string.push_str(&format!("{} -> {} [label=\"{}\"];\n", source, target, label));
         }
-
+    
         dot_string.push_str("}\n");
         dot_string
     }
@@ -99,10 +110,52 @@ impl CfgBuilder {
         
         trimmed_str
     }
-    
+
+    fn add_edge_with_label(&mut self, from: NodeIndex, to: NodeIndex, label: &'a str) {
+        self.graph.add_edge(from, to, label);
+    }
+
+    fn add_node_without_edge(&mut self, node: CfgNode) -> NodeIndex {
+        let index = self.graph.add_node(node);
+        self.current_node = Some(index);
+        index
+    }
+
+    fn post_process(&mut self) {
+        let mut to_remove = Vec::new();
+        let mut edges_to_add = Vec::new();
+
+        // Identify merge nodes and prepare edge adjustments
+        for node in self.graph.node_indices() {
+            if let CfgNode::MergePoint = &self.graph[node] {
+                to_remove.push(node);
+
+                // Collect outgoing edges of the merge node
+                let outgoing_edges: Vec<_> = self.graph.edges(node).map(|e| (e.target(), *e.weight())).collect();
+
+                // Redirect incoming edges of the merge node to its outgoing edges
+                for edge in self.graph.edges_directed(node, petgraph::Direction::Incoming) {
+                    let source = edge.source();
+                    for (target, label) in &outgoing_edges {
+                        edges_to_add.push((source, *target, *label));
+                    }
+                }
+            }
+        }
+
+        // Add new edges
+        for (source, target, label) in edges_to_add {
+            self.graph.add_edge(source, target, label);
+        }
+
+        // Remove merge nodes
+        for node in to_remove {
+            self.graph.remove_node(node);
+        }
+    }
 }
 
-impl<'ast> Visit<'ast> for CfgBuilder {
+impl<'a, 'ast> Visit<'ast> for CfgBuilder<'a> {
     fn visit_file(&mut self, i: &'ast SynFile) {
         visit::visit_file(self, i);
     }
@@ -155,27 +208,65 @@ impl<'ast> Visit<'ast> for CfgBuilder {
     fn visit_expr(&mut self, i: &'ast Expr) {
         match i {
             Expr::If(expr_if) => {
-                // Extract and format only the condition of the if expression
                 let cond_str = self.format_condition(&expr_if.cond);
                 let cond_node = self.add_node(CfgNode::Condition(format!("if: {}", cond_str)));
-                self.current_node = Some(cond_node);
-                self.visit_block(&expr_if.then_branch);
 
-                if let Some((_, else_branch)) = &expr_if.else_branch {
-                    self.add_node(CfgNode::Condition("else".to_string()));
+                // Processing the true branch
+                self.next_edge_label = Some("true");
+                self.current_node = Some(cond_node.clone());
+                self.visit_block(&expr_if.then_branch);
+                let true_branch_end = self.current_node;
+    
+                // Processing the else branch, if it exists
+                let false_branch_end = if let Some((_, else_branch)) = &expr_if.else_branch {
+                    self.current_node = Some(cond_node.clone());
+                    self.next_edge_label = Some("false");
                     match &**else_branch {
-                        Expr::If(elseif) => self.visit_expr_if(elseif),
-                        Expr::Block(block) => self.visit_block(&block.block),
-                        _ => self.visit_expr(else_branch),
+                        Expr::If(elseif) => {
+                            self.visit_expr_if(elseif);
+                            self.current_node
+                        },
+                        Expr::Block(block) => {
+                            self.visit_block(&block.block);
+                            self.current_node
+                        },
+                        _ => {
+                            self.visit_expr(else_branch);
+                            self.current_node
+                        },
                     }
+                } else {
+                    None
+                };
+    
+                // Create a merge point node (you might need a new variant in CfgNode for this)
+                let merge_node = self.add_node_without_edge(CfgNode::MergePoint);
+
+                // Connect the ends of both branches to the merge point
+                if let Some(true_end) = true_branch_end {
+                    self.add_edge_with_label(true_end, merge_node, "");
                 }
-            },
+                if let Some(false_end) = false_branch_end {
+                    self.add_edge_with_label(false_end, merge_node, "");
+                } else {
+                    // If there is no else branch, connect the condition node to the merge point
+                    self.add_edge_with_label(cond_node, merge_node, "");
+                }
+
+                // Continue from the merge point after if-else
+                self.current_node = Some(merge_node);
+            },     
             Expr::While(expr_while) => {
                 // Extract and format only the condition of the while expression
                 let cond_str = self.format_condition(&expr_while.cond);
                 let cond_node = self.add_node(CfgNode::Condition(format!("while: {}", cond_str)));
                 self.current_node = Some(cond_node);
                 self.visit_block(&expr_while.body);
+            },
+            Expr::Return(expr_return) => {
+                let return_expr = expr_return.expr.as_ref().map(|expr| quote!(#expr).to_string()).unwrap_or_else(|| String::from(""));
+                let return_node = self.add_node(CfgNode::Return(return_expr));
+                self.current_node = Some(return_node);
             },
             // ... [handle other expressions] ...
             _ => {
@@ -206,6 +297,9 @@ fn main() {
     let mut builder = CfgBuilder::new();
     builder.visit_file(&ast);
 
+    // Post processing to remove merge nodes.
+
+    builder.post_process();
     let dot_format = builder.to_dot();
 
     let mut dot_filename = filename.clone();
