@@ -182,52 +182,47 @@ impl CfgBuilder {
             format!("if: {}", cond_str)
         };
         let cond_node = self.add_node(CfgNode::Condition(cond_label));
-    
+
         // Processing the true branch
         self.next_edge_label = Some("true".to_string());
         self.current_node = Some(cond_node.clone());
         self.visit_block(&expr_if.then_branch);
         let true_branch_end = self.current_node;
-    
+
         // Create a merge point node
         let merge_node = self.add_node_without_edge(CfgNode::MergePoint);
-    
+
         // Connect the true branch end to the merge point
         if let Some(true_end) = true_branch_end {
             self.add_edge_with_label(true_end, merge_node, "".to_string());
         }
-    
+
         // Handling the else branch, if it exists
-        let false_branch_end = if let Some((_, else_branch)) = &expr_if.else_branch {
+        if let Some((_, else_branch)) = &expr_if.else_branch {
             self.current_node = Some(cond_node.clone());
             self.next_edge_label = Some("false".to_string());
             match &**else_branch {
                 Expr::If(elseif) => {
                     // Recursively handle else if
                     self.handle_if_statement(elseif);
-                    self.current_node
                 },
                 Expr::Block(block) => {
                     self.visit_block(&block.block);
-                    self.current_node
                 },
                 _ => {
                     self.visit_expr(else_branch);
-                    self.current_node
                 },
             }
+
+            // Connect the end of the else branch to the merge point
+            if let Some(false_end) = self.current_node {
+                self.add_edge_with_label(false_end, merge_node, "".to_string());
+            }
         } else {
-            None
-        };
-    
-        // Connect the ends of the else branch to the merge point
-        if let Some(false_end) = false_branch_end {
-            self.add_edge_with_label(false_end, merge_node, "".to_string());
-        } else {
-            // If there is no else branch, connect the condition node to the merge point
-            self.add_edge_with_label(cond_node, merge_node, "".to_string());
+            // If there is no else branch, connect the condition node to the merge point with a 'false' label
+            self.add_edge_with_label(cond_node, merge_node, "false".to_string());
         }
-    
+
         // Continue from the merge point after if-else
         self.current_node = Some(merge_node);
     }
