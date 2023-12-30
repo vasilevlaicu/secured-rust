@@ -37,3 +37,8 @@ Verifying preconditions, postconditions, and invariants contribute to making the
     ```bash
     cargo run -- path/to/your_rust_file.rs
     ```
+
+## Acknowledgments
+
+Generative AI has proven very helpful in several aspects, including tasks such as code formatting, error correction based on compiler feedback, and high-level conceptual reasoning. While it's important to approach these tools with caution and avoid blind reliance, they do offer additional perspectives and occasionally provide valuable guidance. 
+It served as a valuable tool for speeding up code formatting and understanding errors.
