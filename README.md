@@ -33,10 +33,14 @@ Verifying preconditions, postconditions, and invariants contribute to making the
 
 ### Running the Project
 
-- To generate a Control Flow Graph (CFG) from a Rust source file:
-    ```bash
-    cargo run path/to/your_rust_file.rs
-    ```
+To generate a Control Flow Graph (CFG) from a Rust source file, follow these steps:
+
+1. Place the Rust file inside the `tests` folder (`src/tests/your_rust_file.rs`).
+2. Run the project using Cargo:
+
+```bash
+   cargo run your_rust_file.rs
+```
 
 The CFG (Control Flow Graph) of your `your_rust_file.rs` will be generated and found inside `src/graphs/your_rust_file.dot`.
 

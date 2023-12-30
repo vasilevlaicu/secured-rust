@@ -3,7 +3,7 @@ use petgraph::visit::EdgeRef;
 use quote::quote;
 use syn::{
     visit::{self, Visit},
-    Expr, File as SynFile, ItemFn, Stmt, Block,
+    Expr, Pat, File as SynFile, ItemFn, Stmt, Block,
 };
 use std::fs;
 use std::fs::File;
@@ -19,7 +19,6 @@ enum CfgNode {
     Condition(String),
     Return(String),
     MergePoint,
-    // FunctionCall can be included under Statement if desired
 }
 
 impl CfgNode {
@@ -96,10 +95,25 @@ impl CfgBuilder {
         dot_string
     }
 
-    // Helper method to format condition expressions
-    fn format_condition(&self, expr: &Box<Expr>) -> String {
-        quote!(#expr).to_string()
+    fn clean_up_formatting(&self, input: &str) -> String {
+        input.replace(" . ", ".")
+             .replace(" (", "(")
+             .replace(" )", ")")
+             // You can add more replacements as needed
     }
+
+    // Update existing methods to use this new formatting function
+    fn format_condition(&self, expr: &Box<Expr>) -> String {
+        let raw_string = quote!(#expr).to_string();
+        self.clean_up_formatting(&raw_string)
+    }
+
+    fn format_pattern_condition(&self, pat: &Pat) -> String {
+        let raw_string = quote!(#pat).to_string();
+        self.clean_up_formatting(&raw_string)
+    }
+
+    
 
     fn format_macro_args(&self, tokens: &proc_macro2::TokenStream) -> String {
         // Convert the entire token stream to a string
@@ -226,6 +240,29 @@ impl CfgBuilder {
         // Continue from the merge point after if-else
         self.current_node = Some(merge_node);
     }
+
+    fn handle_for_loop(&mut self, expr_for: &syn::ExprForLoop) {
+        let loop_var = self.format_pattern_condition(&expr_for.pat);
+        let iterator = self.format_condition(&expr_for.expr);
+        let cond_label = format!("for {} in {}", loop_var, iterator);
+        let cond_node = self.add_node(CfgNode::Condition(cond_label));
+
+        // Process the loop body
+        self.current_node = Some(cond_node);
+        self.next_edge_label = Some("true".to_string());
+        self.visit_block(&expr_for.body);
+
+        // Link back to the condition node after the loop body
+        let loop_back_node = cond_node;
+        self.add_edge_with_label(self.current_node.unwrap(), loop_back_node, "back to loop".to_string());
+
+        // Create a merge node for the exit of the loop
+        let merge_node = self.add_node_without_edge(CfgNode::MergePoint);
+        self.add_edge_with_label(cond_node, merge_node, "false".to_string());
+
+        // Continue from the merge point after the loop
+        self.current_node = Some(merge_node);
+    }
 }
 
 impl Visit<'_> for CfgBuilder {
@@ -315,6 +352,9 @@ impl Visit<'_> for CfgBuilder {
                 // Continue from the merge point
                 self.current_node = Some(merge_node);
             },
+            Expr::ForLoop(expr_for) => {
+                self.handle_for_loop(expr_for);
+            },
             Expr::Return(expr_return) => {
                 let return_expr = expr_return.expr.as_ref().map(|expr| quote!(#expr).to_string()).unwrap_or_else(|| String::from(""));
                 let return_node = self.add_node(CfgNode::Return(return_expr));
@@ -355,7 +395,13 @@ fn main() {
     }
     let filename = &args[1];
 
-    let content = fs::read_to_string(filename).expect("Could not read file");
+    // Append the path to the src/tests/ directory
+    let mut src_path = std::path::PathBuf::new();
+    src_path.push("src");
+    src_path.push("tests");
+    src_path.push(filename); // Append the filename
+
+    let content = fs::read_to_string(&src_path).expect("Could not read file");
     let ast = syn::parse_file(&content).expect("Unable to parse file");
 
     let mut builder = CfgBuilder::new();
@@ -366,18 +412,23 @@ fn main() {
     builder.post_process();
     let dot_format = builder.to_dot();
 
+    // Create the output directory if it doesn't exist
+    let mut output_path = std::path::PathBuf::new();
+    output_path.push("src");
+    output_path.push("graphs");
+    fs::create_dir_all(&output_path).expect("Unable to create graphs directory");
+
+    // Construct the full path for the DOT file
     let mut dot_filename = filename.clone();
     if dot_filename.ends_with(".rs") {
         dot_filename.truncate(dot_filename.len() - 3);
     }
+    output_path.push(format!("{}.dot", dot_filename));
 
-    let mut full_path = std::env::current_dir().expect("Unable to get current directory");
-    full_path.push("graphs");
-    fs::create_dir_all(&full_path).expect("Unable to create graphs directory");
-    full_path.push(format!("{}.dot", dot_filename));
-
-    let mut dot_file = File::create(&full_path).expect("Unable to create DOT file");
+    // Write the DOT file
+    let mut dot_file = File::create(&output_path).expect("Unable to create DOT file");
     dot_file.write_all(dot_format.as_bytes()).expect("Unable to write to DOT file");
 
-    println!("DOT file saved as {:?}", full_path);
+    println!("DOT file saved as {:?}", output_path);
 }
+
