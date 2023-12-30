@@ -242,24 +242,35 @@ impl CfgBuilder {
     }
 
     fn handle_for_loop(&mut self, expr_for: &syn::ExprForLoop) {
+        // Check if the last node was an invariant
+        let invariant_node = self.current_node
+            .filter(|&current| matches!(self.graph[current], CfgNode::Invariant(_)));
+    
         let loop_var = self.format_pattern_condition(&expr_for.pat);
         let iterator = self.format_condition(&expr_for.expr);
         let cond_label = format!("for {} in {}", loop_var, iterator);
         let cond_node = self.add_node(CfgNode::Condition(cond_label));
-
+    
+        // Link the invariant to the condition node only if it exists and hasn't been linked yet
+        if let Some(inv_node) = invariant_node {
+            if self.graph.find_edge(inv_node, cond_node).is_none() {
+                self.add_edge_with_label(inv_node, cond_node, "".to_string());
+            }
+        }
+    
         // Process the loop body
         self.current_node = Some(cond_node);
         self.next_edge_label = Some("true".to_string());
         self.visit_block(&expr_for.body);
-
-        // Link back to the condition node after the loop body
-        let loop_back_node = cond_node;
+    
+        // Link back to the invariant or condition node after the loop body
+        let loop_back_node = invariant_node.unwrap_or(cond_node);
         self.add_edge_with_label(self.current_node.unwrap(), loop_back_node, "back to loop".to_string());
-
+    
         // Create a merge node for the exit of the loop
         let merge_node = self.add_node_without_edge(CfgNode::MergePoint);
         self.add_edge_with_label(cond_node, merge_node, "false".to_string());
-
+    
         // Continue from the merge point after the loop
         self.current_node = Some(merge_node);
     }

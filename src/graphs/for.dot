@@ -12,12 +12,13 @@ digraph G {
 10 [label="counter += 1", shape=box]
 11 [label="let sum_result = fibonacci_sum (num) ;", shape=box]
 12 [label="let mut sum = 0 ;", shape=box]
-13 [label="for fib_number in fib.iter().take(n as usize)", shape=diamond]
-14 [label="sum += fib_number", shape=box]
-15 [label="Sum of the first {} Fibonacci numbers is {}\" , num , sum_result", shape=box]
-16 [label="sum", shape=box]
-17 [label="main", shape=Mdiamond]
-18 [label="let num = 5 ;", shape=box]
+13 [label="Inv: sum >= 0", shape=ellipse]
+14 [label="for fib_number in fib.iter().take(n as usize)", shape=diamond]
+15 [label="sum += fib_number", shape=box]
+16 [label="Sum of the first {} Fibonacci numbers is {}\" , num , sum_result", shape=box]
+17 [label="sum", shape=box]
+18 [label="main", shape=Mdiamond]
+19 [label="let num = 5 ;", shape=box]
 0 -> 1 [label=""];
 1 -> 2 [label=""];
 2 -> 3 [label=""];
@@ -29,12 +30,13 @@ digraph G {
 8 -> 9 [label=""];
 9 -> 10 [label=""];
 10 -> 6 [label="back to loop"];
-18 -> 11 [label=""];
+19 -> 11 [label=""];
 7 -> 12 [label="false"];
 12 -> 13 [label=""];
-13 -> 14 [label="true"];
-14 -> 13 [label="back to loop"];
-11 -> 15 [label=""];
-13 -> 16 [label="false"];
-17 -> 18 [label=""];
+13 -> 14 [label=""];
+14 -> 15 [label="true"];
+15 -> 13 [label="back to loop"];
+11 -> 16 [label=""];
+14 -> 17 [label="false"];
+18 -> 19 [label=""];
 }
