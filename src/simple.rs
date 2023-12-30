@@ -1,26 +1,39 @@
 use annotations::{pre, post, invariant};
 
-pub fn add(a: i32) -> i32 {
-    pre!("a > 0");
-    post!("counter == a");
-    let mut counter = 0;
-    invariant!("counter >= 0 && counter <= a");
-    while counter < a {
+/// Calculates the factorial of a number.
+/// 
+/// # Arguments
+/// 
+/// * `n` - A non-negative integer whose factorial is to be calculated.
+///
+/// # Returns
+/// 
+/// The factorial of `n`.
+pub fn factorial(n: i32) -> i32 {
+    pre!("n >= 0");
+    post!("result >= 1");
+    
+    let mut result = 1;
+    let mut counter = 1;
+
+    invariant!("result == factorial(counter - 1) && counter <= n + 1");
+    while counter <= n {
+        result *= counter;
         counter += 1;
     }
-    if true {
-      counter -=1 ;
+
+    if n == 0 {
+        result = 1; // Special case for 0! which is 1.
     }
-    else if false {
-      counter +=1;
+    else if n < 0 {
+        result = 0; // Handling negative inputs.
     }
-    else {
-      counter = 0;
-    }
-    counter
+
+    result
 }
 
 fn main() {
-    let result = add(5);
-    println!("Result: {}", result);
+    let num = 5;
+    let factorial_result = factorial(num);
+    println!("Factorial of {} is {}", num, factorial_result);
 }
