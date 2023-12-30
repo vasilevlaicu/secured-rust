@@ -122,36 +122,113 @@ impl<'a> CfgBuilder<'a> {
     }
 
     fn post_process(&mut self) {
-        let mut to_remove = Vec::new();
-        let mut edges_to_add = Vec::new();
+        let mut merge_nodes_to_process: Vec<NodeIndex> = self.graph.node_indices()
+            .filter(|&n| matches!(self.graph[n], CfgNode::MergePoint))
+            .collect();
 
-        // Identify merge nodes and prepare edge adjustments
-        for node in self.graph.node_indices() {
-            if let CfgNode::MergePoint = &self.graph[node] {
-                to_remove.push(node);
+        while let Some(merge_node) = merge_nodes_to_process.pop() {
+            // Check if the merge node has edges (i.e., is still part of the graph)
+            if self.graph.edges(merge_node).count() == 0 {
+                continue;
+            }
 
-                // Collect outgoing edges of the merge node
-                let outgoing_edges: Vec<_> = self.graph.edges(node).map(|e| (e.target(), *e.weight())).collect();
+            // Find outgoing edges of the merge node
+            let edges: Vec<_> = self.graph.edges(merge_node).collect();
 
-                // Redirect incoming edges of the merge node to its outgoing edges
-                for edge in self.graph.edges_directed(node, petgraph::Direction::Incoming) {
-                    let source = edge.source();
-                    for (target, label) in &outgoing_edges {
-                        edges_to_add.push((source, *target, *label));
-                    }
+            if edges.len() == 1 {
+                let target = edges[0].target();
+                if matches!(self.graph[target], CfgNode::MergePoint) {
+                    // If the target is another merge node, merge them
+                    self.merge_merge_nodes(merge_node, target);
+                    merge_nodes_to_process.push(target);
+                } else {
+                    // If the target is not a merge node, redirect incoming edges and remove the merge node
+                    self.redirect_edges_and_remove(merge_node, target);
                 }
             }
         }
+    }
 
-        // Add new edges
-        for (source, target, label) in edges_to_add {
-            self.graph.add_edge(source, target, label);
+    fn merge_merge_nodes(&mut self, source: NodeIndex, target: NodeIndex) {
+        let incoming_edges: Vec<_> = self.graph.edges_directed(source, petgraph::Direction::Incoming)
+            .map(|e| (e.source(), *e.weight()))
+            .collect();
+    
+        for (source_of_edge, weight) in incoming_edges {
+            self.graph.add_edge(source_of_edge, target, weight);
         }
-
-        // Remove merge nodes
-        for node in to_remove {
-            self.graph.remove_node(node);
+    
+        self.graph.remove_node(source);
+    }
+    
+    fn redirect_edges_and_remove(&mut self, source: NodeIndex, new_target: NodeIndex) {
+        let incoming_edges: Vec<_> = self.graph.edges_directed(source, petgraph::Direction::Incoming)
+            .map(|e| (e.source(), *e.weight()))
+            .collect();
+    
+        for (source_of_edge, weight) in incoming_edges {
+            self.graph.add_edge(source_of_edge, new_target, weight);
         }
+    
+        self.graph.remove_node(source);
+    }
+    
+    fn handle_if_statement(&mut self, expr_if: &syn::ExprIf) {
+        let cond_str = self.format_condition(&expr_if.cond);
+        let cond_label = if self.next_edge_label == Some("false") {
+            format!("else if: {}", cond_str)
+        } else {
+            format!("if: {}", cond_str)
+        };
+        let cond_node = self.add_node(CfgNode::Condition(cond_label));
+    
+        // Processing the true branch
+        self.next_edge_label = Some("true");
+        self.current_node = Some(cond_node.clone());
+        self.visit_block(&expr_if.then_branch);
+        let true_branch_end = self.current_node;
+    
+        // Create a merge point node
+        let merge_node = self.add_node_without_edge(CfgNode::MergePoint);
+    
+        // Connect the true branch end to the merge point
+        if let Some(true_end) = true_branch_end {
+            self.add_edge_with_label(true_end, merge_node, "");
+        }
+    
+        // Handling the else branch, if it exists
+        let false_branch_end = if let Some((_, else_branch)) = &expr_if.else_branch {
+            self.current_node = Some(cond_node.clone());
+            self.next_edge_label = Some("false");
+            match &**else_branch {
+                Expr::If(elseif) => {
+                    // Recursively handle else if
+                    self.handle_if_statement(elseif);
+                    self.current_node
+                },
+                Expr::Block(block) => {
+                    self.visit_block(&block.block);
+                    self.current_node
+                },
+                _ => {
+                    self.visit_expr(else_branch);
+                    self.current_node
+                },
+            }
+        } else {
+            None
+        };
+    
+        // Connect the ends of the else branch to the merge point
+        if let Some(false_end) = false_branch_end {
+            self.add_edge_with_label(false_end, merge_node, "");
+        } else {
+            // If there is no else branch, connect the condition node to the merge point
+            self.add_edge_with_label(cond_node, merge_node, "");
+        }
+    
+        // Continue from the merge point after if-else
+        self.current_node = Some(merge_node);
     }
 }
 
@@ -208,60 +285,39 @@ impl<'a, 'ast> Visit<'ast> for CfgBuilder<'a> {
     fn visit_expr(&mut self, i: &'ast Expr) {
         match i {
             Expr::If(expr_if) => {
-                let cond_str = self.format_condition(&expr_if.cond);
-                let cond_node = self.add_node(CfgNode::Condition(format!("if: {}", cond_str)));
-
-                // Processing the true branch
-                self.next_edge_label = Some("true");
-                self.current_node = Some(cond_node.clone());
-                self.visit_block(&expr_if.then_branch);
-                let true_branch_end = self.current_node;
-    
-                // Processing the else branch, if it exists
-                let false_branch_end = if let Some((_, else_branch)) = &expr_if.else_branch {
-                    self.current_node = Some(cond_node.clone());
-                    self.next_edge_label = Some("false");
-                    match &**else_branch {
-                        Expr::If(elseif) => {
-                            self.visit_expr_if(elseif);
-                            self.current_node
-                        },
-                        Expr::Block(block) => {
-                            self.visit_block(&block.block);
-                            self.current_node
-                        },
-                        _ => {
-                            self.visit_expr(else_branch);
-                            self.current_node
-                        },
-                    }
-                } else {
-                    None
-                };
-    
-                // Create a merge point node (you might need a new variant in CfgNode for this)
-                let merge_node = self.add_node_without_edge(CfgNode::MergePoint);
-
-                // Connect the ends of both branches to the merge point
-                if let Some(true_end) = true_branch_end {
-                    self.add_edge_with_label(true_end, merge_node, "");
-                }
-                if let Some(false_end) = false_branch_end {
-                    self.add_edge_with_label(false_end, merge_node, "");
-                } else {
-                    // If there is no else branch, connect the condition node to the merge point
-                    self.add_edge_with_label(cond_node, merge_node, "");
-                }
-
-                // Continue from the merge point after if-else
-                self.current_node = Some(merge_node);
-            },     
+                self.handle_if_statement(expr_if);
+            },
             Expr::While(expr_while) => {
-                // Extract and format only the condition of the while expression
+                // Check if the last node was an invariant
+                let invariant_node = self.current_node
+                    .filter(|&current| matches!(self.graph[current], CfgNode::Invariant(_)));
+    
+                // Create a node for the while condition
                 let cond_str = self.format_condition(&expr_while.cond);
                 let cond_node = self.add_node(CfgNode::Condition(format!("while: {}", cond_str)));
+    
+                // Link the invariant to the condition node only if it exists and hasn't been linked yet
+                if let Some(inv_node) = invariant_node {
+                    if self.graph.find_edge(inv_node, cond_node).is_none() {
+                        self.add_edge_with_label(inv_node, cond_node, "");
+                    }
+                }
+    
+                // Process the loop body
                 self.current_node = Some(cond_node);
+                self.next_edge_label = Some("true");
                 self.visit_block(&expr_while.body);
+    
+                // Link back to the invariant or condition node after the loop body
+                let loop_back_node = invariant_node.unwrap_or(cond_node);
+                self.add_edge_with_label(self.current_node.unwrap(), loop_back_node, "back to loop");
+    
+                // Create a merge node for the false branch of the condition
+                let merge_node = self.add_node_without_edge(CfgNode::MergePoint);
+                self.add_edge_with_label(cond_node, merge_node, "false");
+    
+                // Continue from the merge point
+                self.current_node = Some(merge_node);
             },
             Expr::Return(expr_return) => {
                 let return_expr = expr_return.expr.as_ref().map(|expr| quote!(#expr).to_string()).unwrap_or_else(|| String::from(""));
@@ -270,6 +326,18 @@ impl<'a, 'ast> Visit<'ast> for CfgBuilder<'a> {
             },
             // ... [handle other expressions] ...
             _ => {
+                // Handle invariant macro here
+                if let Expr::Macro(expr_macro) = i {
+                    if let Some(macro_ident) = expr_macro.mac.path.get_ident() {
+                        if macro_ident == "invariant" {
+                            // Handle invariant
+                            let invariant_str = self.format_macro_args(&expr_macro.mac.tokens);
+                            self.add_node(CfgNode::Invariant(invariant_str));
+                            return;
+                        }
+                    }
+                }
+    
                 let expr_str = quote!(#i).to_string();
                 self.add_node(CfgNode::Statement(expr_str));
             },

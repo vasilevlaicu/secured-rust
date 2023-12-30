@@ -6,24 +6,28 @@ digraph G {
 4 [label="Inv: counter >= 0 && counter <= a", shape=ellipse]
 5 [label="while: counter < a", shape=diamond]
 6 [label="counter += 1", shape=box]
-7 [label="if: true", shape=diamond]
-8 [label="counter -= 1", shape=box]
-9 [label="counter += 1", shape=box]
-10 [label="Result: {}\" , result", shape=box]
-11 [label="counter", shape=box]
-12 [label="main", shape=Mdiamond]
-13 [label="let result = add (5) ;", shape=box]
+7 [label="counter", shape=box]
+8 [label="if: true", shape=diamond]
+9 [label="counter -= 1", shape=box]
+10 [label="main", shape=Mdiamond]
+11 [label="else if: false", shape=diamond]
+12 [label="counter += 1", shape=box]
+13 [label="Result: {}\" , result", shape=box]
+14 [label="counter = 0", shape=box]
 0 -> 1 [label=""];
 1 -> 2 [label=""];
 2 -> 3 [label=""];
 3 -> 4 [label=""];
 4 -> 5 [label=""];
-5 -> 6 [label=""];
-6 -> 7 [label=""];
-7 -> 8 [label="true"];
-7 -> 9 [label="false"];
-13 -> 10 [label=""];
-9 -> 11 [label=""];
-8 -> 11 [label=""];
-12 -> 13 [label=""];
+5 -> 6 [label="true"];
+6 -> 4 [label="back to loop"];
+14 -> 7 [label=""];
+5 -> 8 [label="false"];
+8 -> 9 [label="true"];
+9 -> 7 [label=""];
+8 -> 11 [label="false"];
+11 -> 12 [label="true"];
+10 -> 13 [label=""];
+11 -> 14 [label="false"];
+12 -> 7 [label=""];
 }

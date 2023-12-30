@@ -11,8 +11,11 @@ pub fn add(a: i32) -> i32 {
     if true {
       counter -=1 ;
     }
+    else if false {
+      counter +=1;
+    }
     else {
-      counter += 1;
+      counter = 0;
     }
     counter
 }
