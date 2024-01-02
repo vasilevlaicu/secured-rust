@@ -25,7 +25,7 @@ pub fn fibonacci_sum(n: i32) -> i32 {
     }
 
     let mut sum = 0;
-    invariant!("sum >= 0");
+    //invariant!("sum >= 0");
     for fib_number in fib.iter().take(n as usize) {
         sum += fib_number;
     }

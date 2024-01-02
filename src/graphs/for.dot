@@ -12,7 +12,7 @@ digraph G {
 10 [label="counter += 1", shape=box]
 11 [label="let sum_result = fibonacci_sum(num);", shape=box]
 12 [label="let mut sum = 0;", shape=box]
-13 [label="Inv: sum >= 0", shape=ellipse]
+13 [label="@Cutoff ", shape=ellipse]
 14 [label="for fib_number in fib.iter().take(n as usize)", shape=diamond]
 15 [label="sum += fib_number", shape=box]
 16 [label="Sum of the first {} Fibonacci numbers is {}\",num,sum_result", shape=box]
