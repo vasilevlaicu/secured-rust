@@ -29,7 +29,7 @@ impl CfgNode {
             CfgNode::Function(func) => (func.clone(), "Mdiamond"),
             CfgNode::Precondition(pre) => (format!("Pre: {}", pre), "ellipse"), // Use "ellipse" shape
             CfgNode::Postcondition(post) => (format!("Post: {}", post), "ellipse"), // Use "ellipse" shape
-            CfgNode::Invariant(inv) => (format!("Inv: {}", inv), "ellipse"), // Use "ellipse" shape
+            CfgNode::Invariant(inv) => (format!("@Inv: {}", inv), "ellipse"), // Use "ellipse" shape
             CfgNode::Statement(stmt) => (stmt.clone(), "box"),
             CfgNode::Condition(cond) => (cond.clone(), "diamond"),
             CfgNode::Cutoff(inv) => (format!("@Cutoff {}", inv), "ellipse"), // Use "ellipse" shape)
