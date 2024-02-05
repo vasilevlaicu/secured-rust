@@ -1,0 +1,25 @@
+{
+    "externalMethods": [
+      {
+        "name": "vec!",
+        "preconditions": [],
+        "postconditions": ["result.len() == init_len"]
+      },
+      {
+        "name": "push",
+        "preconditions": [],
+        "postconditions": ["vec.len() == old(vec.len()) + 1", "vec.last() == Some(&element)"]
+      },
+      {
+        "name": "iter",
+        "preconditions": [],
+        "postconditions": ["result.count() == vec.len()"]
+      },
+      {
+        "name": "take",
+        "preconditions": ["n >= 0"],
+        "postconditions": ["result.count() <= n"]
+      }
+    ]
+  }
+  

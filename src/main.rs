@@ -3,12 +3,26 @@ use petgraph::visit::EdgeRef;
 use quote::quote;
 use syn::{
     visit::{self, Visit},
-    Expr, Pat, File as SynFile, ItemFn, Stmt, Block,
+    Expr, Pat, File as SynFile, ItemFn, Stmt, Block, ExprMacro, punctuated::Punctuated, token::Comma
 };
+
 use std::fs;
 use std::fs::File;
 use std::io::Write;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct ExternalMethod {
+    name: String,
+    preconditions: Vec<String>,
+    postconditions: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct ExternalMethods {
+    externalMethods: Vec<ExternalMethod>,
+}
 
 #[derive(Debug, Clone)]
 enum CfgNode {
@@ -50,15 +64,25 @@ struct CfgBuilder {
     graph: DiGraph<CfgNode, String>,
     current_node: Option<NodeIndex>,
     next_edge_label: Option<String>,
+    external_conditions: ExternalMethods, // Add this line
 }
 
 
 impl CfgBuilder {
     fn new() -> Self {
+        let external_conditions = match Self::parse_external_definitions("src/config/conditions.json") {
+            Ok(conditions) => conditions,
+            Err(e) => {
+                eprintln!("Failed to load external conditions: {}", e);
+                ExternalMethods { externalMethods: vec![] } // Use an empty list if loading fails
+            }
+        };
+
         CfgBuilder {
             graph: DiGraph::new(),
             current_node: None,
-            next_edge_label: None, // Initialize the new field
+            next_edge_label: None,
+            external_conditions, // Initialize with loaded conditions    fn visit_expr(&mut self, i: &Expr) {
         }
     }
 
@@ -100,36 +124,28 @@ impl CfgBuilder {
 
     fn clean_up_formatting(input: &str) -> String {
         let re = Regex::new(r"\s*([\(\)\[\]!\.,;])\s*").unwrap();
-        let mut cleaned = re.replace_all(input, "$1").to_string();
-    
-        // Replace "vec! [" with "vec![" (remove spaces only where needed)
-        cleaned = cleaned.replace("vec! [", "vec!["); // Remove spaces only where needed
-        cleaned = cleaned.replace("+ ", " + ");
+        let cleaned = re.replace_all(input, "$1").to_string();
 
-        cleaned
+        cleaned.replace("vec! [", "vec![")
+               .replace("+ ", " + ")
     }
-    
-    
+
     fn format_condition(&self, expr: &Box<Expr>) -> String {
         let raw_string = quote!(#expr).to_string();
-        Self::clean_up_formatting(&raw_string) // Use Self:: to call the associated function
+        Self::clean_up_formatting(&raw_string)
     }
-    
+
     fn format_pattern_condition(&self, pat: &Pat) -> String {
         let raw_string = quote!(#pat).to_string();
-        Self::clean_up_formatting(&raw_string) // Use Self:: to call the associated function
+        Self::clean_up_formatting(&raw_string)
     }
 
-    
-
     fn format_macro_args(&self, tokens: &proc_macro2::TokenStream) -> String {
-        // Convert the entire token stream to a string
         let tokens_str = tokens.to_string();
-        
-        // Trim leading and trailing whitespace and quotation marks
-        let trimmed_str = tokens_str.trim_start_matches("!(").trim_end_matches(')').trim_matches(|c| c == '"' || c == '\'').to_string();
-        
-        trimmed_str
+        tokens_str.trim_start_matches("!(")
+                  .trim_end_matches(')')
+                  .trim_matches(|c| c == '"' || c == '\'')
+                  .to_string()
     }
 
     fn add_edge_with_label(&mut self, from: NodeIndex, to: NodeIndex, label: String) {
@@ -291,6 +307,58 @@ impl CfgBuilder {
         // Continue from the merge point after the loop
         self.current_node = Some(merge_node);
     }
+
+    fn parse_external_definitions(file_path: &str) -> Result<ExternalMethods, Box<dyn std::error::Error>> {
+        // Read the file to a string
+        let file_content = fs::read_to_string(file_path)?;
+    
+        // Deserialize the JSON to the Rust data structure
+        let external_methods: ExternalMethods = serde_json::from_str(&file_content)?;
+    
+        Ok(external_methods)
+    }    
+    
+    fn process_macro(&mut self, expr_macro: &ExprMacro) {
+        
+        // Extract macro name
+        let macro_name = format!("{}!", expr_macro.mac.path.segments.last().unwrap().ident);
+        // Process macro similar to your original handling
+        self.process_external_conditions(&macro_name, quote!(#expr_macro).to_string());
+    }
+    
+    fn process_macro_call_as_function(&mut self, args: &Punctuated<Expr, Comma>, macro_name: &str) {
+
+        // Process the function call as a macro invocation
+        let call_expression = format!("{}[{}]", macro_name, quote!(#args));
+        self.process_external_conditions(macro_name, call_expression);
+    }
+    
+    fn process_external_conditions(&mut self, name: &str, call_expression: String) {
+
+        // Clone the external methods to avoid borrowing `self` while we're also mutating it
+        let external_methods = self.external_conditions.externalMethods.clone();
+    
+        // Iterate over the cloned external methods
+        if let Some(external_method) = external_methods.iter().find(|m| m.name == name) {
+            // Add preconditions
+            for pre in &external_method.preconditions {
+                self.add_node(CfgNode::Precondition(pre.clone()));
+            }
+    
+            // Add the call expression node
+            self.add_node(CfgNode::Statement(format!("Call: {}", CfgBuilder::clean_up_formatting(&call_expression))));
+    
+            // Add postconditions
+            for post in &external_method.postconditions {
+                self.add_node(CfgNode::Postcondition(post.clone()));
+            }
+        } else {
+            // If no external conditions match, consider adding the call expression as a regular statement
+            self.add_node(CfgNode::Statement(format!("Call: {}", CfgBuilder::clean_up_formatting(&call_expression))));
+        }
+    }
+    
+
 }
 
 impl Visit<'_> for CfgBuilder {
@@ -390,6 +458,60 @@ impl Visit<'_> for CfgBuilder {
                 let return_expr = expr_return.expr.as_ref().map(|expr| quote!(#expr).to_string()).unwrap_or_else(|| String::from(""));
                 let return_node = self.add_node(CfgNode::Return(return_expr));
                 self.current_node = Some(return_node);
+            },
+
+            Expr::Call(expr_call) => {
+                println!("Inside the Call expr!!!!!!!!!!!!");
+
+                if let Expr::Path(expr_path) = &*expr_call.func {
+                    if let Some(segment) = expr_path.path.segments.last() {
+                        if segment.ident == "vec" {
+                            // Handle vec![] macro call here
+                            self.process_macro_call_as_function(&expr_call.args, "vec!");
+                        }
+                    }
+                }
+    
+                // Visit arguments of the call
+                for arg in &expr_call.args {
+                    self.visit_expr(arg);
+                }
+            },
+            Expr::MethodCall(expr_method_call) => {
+                let method_name = expr_method_call.method.to_string();
+                let maybe_external_method = self.external_conditions.externalMethods.iter()
+                    .find(|m| m.name == method_name)
+                    .cloned(); // Clone to release the borrow on self
+    
+                if let Some(external_method) = maybe_external_method {
+                    // Add preconditions before the method call
+                    for pre in external_method.preconditions {
+                        self.add_node(CfgNode::Precondition(pre));
+                    }
+    
+                    // Add the full method call expression
+                    let call_expression = quote!(#expr_method_call).to_string();
+                    let call_description = format!("Call: {}", Self::clean_up_formatting(&call_expression));
+                    self.add_node(CfgNode::Statement(call_description));
+    
+                    // Add postconditions after the method call
+                    for post in external_method.postconditions {
+                        self.add_node(CfgNode::Postcondition(post));
+                    }
+    
+                    return; // Skip standard processing
+                }
+    
+                // Standard processing if no external conditions match
+                visit::visit_expr(self, i);
+            },
+            Expr::Macro(expr_macro) => {
+                self.process_macro(expr_macro);
+            },
+            Expr::Array(expr_array) => {
+                for elem in &expr_array.elems {
+                    self.visit_expr(elem); // Recursively visit to catch nested macros
+                }
             },
             // ... [handle other expressions] ...
             _ => {

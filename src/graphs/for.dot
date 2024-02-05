@@ -8,13 +8,19 @@ digraph G {
 6 [label="@Inv: fib.len() == counter && counter <= n + 1", shape=ellipse]
 7 [label="while: counter <= n", shape=diamond]
 8 [label="let new_fib = fib[counter - 1] + fib[counter - 2];", shape=box]
-9 [label="fib.push(new_fib)", shape=box]
-10 [label="counter += 1", shape=box]
-11 [label="sum", shape=box]
-12 [label="let mut sum = 0;", shape=box]
-13 [label="@Cutoff ", shape=ellipse]
-14 [label="for fib_number in fib.iter().take(n as usize)", shape=diamond]
-15 [label="sum += fib_number", shape=box]
+9 [label="Call: fib.push(new_fib)", shape=box]
+10 [label="Post: vec.len() == old(vec.len()) + 1", shape=ellipse]
+11 [label="Post: vec.last() == Some(&element)", shape=ellipse]
+12 [label="counter += 1", shape=box]
+13 [label="let sum_result = fibonacci_sum(num);", shape=box]
+14 [label="let mut sum = 0;", shape=box]
+15 [label="@Cutoff ", shape=ellipse]
+16 [label="for fib_number in fib.iter().take(n as usize)", shape=diamond]
+17 [label="sum += fib_number", shape=box]
+18 [label="Sum of the first {} Fibonacci numbers is {}\",num,sum_result", shape=box]
+19 [label="sum", shape=box]
+20 [label="main", shape=Mdiamond]
+21 [label="let num = 5;", shape=box]
 0 -> 1 [label=""];
 1 -> 2 [label=""];
 2 -> 3 [label=""];
@@ -25,11 +31,16 @@ digraph G {
 7 -> 8 [label="true"];
 8 -> 9 [label=""];
 9 -> 10 [label=""];
-10 -> 6 [label="back to loop"];
-14 -> 11 [label="false"];
-7 -> 12 [label="false"];
-12 -> 13 [label=""];
-13 -> 14 [label=""];
-14 -> 15 [label="true"];
-15 -> 13 [label="back to loop"];
+10 -> 11 [label=""];
+11 -> 12 [label=""];
+12 -> 6 [label="back to loop"];
+21 -> 13 [label=""];
+7 -> 14 [label="false"];
+14 -> 15 [label=""];
+15 -> 16 [label=""];
+16 -> 17 [label="true"];
+17 -> 15 [label="back to loop"];
+13 -> 18 [label=""];
+16 -> 19 [label="false"];
+20 -> 21 [label=""];
 }
